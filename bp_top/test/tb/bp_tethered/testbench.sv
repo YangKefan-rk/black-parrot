@@ -295,6 +295,104 @@ module testbench
 `endif
 `endif
 
+`ifdef BP_DIFFTEST_S
+  initial begin
+    if (async_coh_clk_p || async_mem_clk_p || async_dma_clk_p)
+      $fatal(1, "Difftest-S native profile Unsupported: asynchronous clock mapping");
+    if (dcache_data_width_p != 64)
+      $fatal(1, "Difftest-S native profile Unsupported: non-64-bit memory data");
+  end
+
+  // All harts in this native profile share dut_clk. Core events sample the
+  // old counter at posedge; the inverted D$ clock observes the following odd
+  // half-cycle. Same-edge hart conflicts remain unordered by this timebase.
+  logic [63:0] difftest_s_cycle = 0;
+  always @(posedge dut_clk)
+    difftest_s_cycle <= difftest_s_cycle + 1'b1;
+  wire [63:0] difftest_s_core_time = difftest_s_cycle << 1;
+  wire [63:0] difftest_s_memory_time = (difftest_s_cycle << 1) - 1'b1;
+
+`ifdef BP_DIFFTEST_S_SESSION
+  import "DPI-C" context function int bp_difftest_s_session_start
+    (input string elf, input int unsigned harts);
+  initial begin : start_difftest_s_session
+    string elf;
+    if (!$value$plusargs("bp_difftest_s_elf=%s", elf))
+      $fatal(1, "Difftest-S session requires +bp_difftest_s_elf=<ELF>");
+    if (bp_difftest_s_session_start(elf, num_core_p) != 0)
+      $fatal(1, "Difftest-S session bootstrap rejected the ELF/profile");
+  end
+`endif
+
+  logic difftest_s_terminal_end = 0;
+  bind bp_be_top bp_be_nonsynth_difftest_s
+   #(.bp_params_p(bp_params_p))
+   difftest_s_probe
+    (.clk_i(clk_i), .reset_i(reset_i), .en_i(1'b1)
+     ,.source_time_i(testbench.difftest_s_core_time)
+     ,.terminal_end_i(testbench.difftest_s_terminal_end));
+
+  bind bp_be_top bp_be_nonsynth_difftest_s_mem
+   #(.bp_params_p(bp_params_p))
+   difftest_s_memory_probe
+    (.clk_i(clk_i), .reset_i(reset_i), .en_i(difftest_s_probe.initialized_r)
+     ,.source_time_i(testbench.difftest_s_memory_time));
+
+`ifdef BP_DIFFTEST_S_COHERENCE
+  bind bp_be_top bp_be_nonsynth_difftest_s_coherence
+   #(.bp_params_p(bp_params_p))
+   difftest_s_coherence_probe
+    (.clk_i(clk_i), .reset_i(reset_i), .en_i(difftest_s_probe.initialized_r)
+     ,.source_time_i(testbench.difftest_s_memory_time));
+`endif
+
+  import "DPI-C" context function int bp_difftest_s_finish();
+`ifdef BP_DIFFTEST_S_ONLINE
+  import "DPI-C" context function int bp_difftest_s_advance
+    (input longint unsigned delivered_through_tick);
+`endif
+`ifdef BP_DIFFTEST_S_TERMINAL
+  import "DPI-C" context function int bp_difftest_s_can_end();
+  import "DPI-C" context function int bp_difftest_s_close_prefix
+    (input longint unsigned completed_cycle);
+  bit difftest_s_terminal_sealing = 0;
+  initial begin
+    if (bp_params_p != e_bp_multicore_4_cfg || sim_clock_period_p <= 2)
+      $fatal(1, "Difftest-S terminal boundary requires four harts and a clock half-period above one tick");
+  end
+  // One simulation tick places closure after all negedge source callbacks and
+  // NBA shadow updates, while remaining before the next core edge. Source
+  // timestamps remain their original even/odd hardware half-cycle ticks.
+  always @(negedge dut_clk) begin
+    #1;
+    if (!dut_reset) begin
+`ifdef BP_DIFFTEST_S_ONLINE
+      // This phase boundary confirms delivery through the cache edge. Older
+      // delayed samples still constrain the host's independent source watermarks.
+      if (bp_difftest_s_advance(difftest_s_memory_time) != 0)
+        $fatal(1, "Difftest-S online source delivery rejected");
+`endif
+      if (!difftest_s_terminal_sealing && bp_difftest_s_can_end() == 1) begin
+        difftest_s_terminal_end = 1;
+        difftest_s_terminal_sealing = 1;
+      end else if (difftest_s_terminal_sealing) begin
+        if (bp_difftest_s_close_prefix(difftest_s_memory_time + 1) != 0)
+          $fatal(1, "Difftest-S terminal source prefix was not fully delivered");
+        $display("[Difftest-S native] terminal prefix closed");
+        if (bp_difftest_s_finish() != 0)
+          $fatal(1, "Difftest-S terminal verification rejected finalization");
+        $display("[Difftest-S native] all harts sealed after final memory-source edge");
+        $display("[BSG-PASS]");
+        $finish;
+      end
+    end
+  end
+`endif
+  final begin
+    if (bp_difftest_s_finish() != 0)
+      $error("Difftest-S native observation transport rejected finalization");
+  end
+`else
   wire cosim_en_li = 1'b1;
   localparam cosim_trace_en_li = cosim_trace_p;
   localparam cosim_check_en_li = cosim_check_p;
@@ -314,6 +412,8 @@ module testbench
        ,.cosim_clk_i(testbench.tb_clk)
        ,.cosim_reset_i(testbench.tb_reset)
        );
+
+`endif
 
   wire uce_trace_en_li = 1'b1;
   bind bp_uce
