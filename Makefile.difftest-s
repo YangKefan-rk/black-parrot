@@ -1,0 +1,167 @@
+# Build the native baseline from the RTL checkout:
+#   make -f Makefile.difftest-s build.verilator DIFFTEST_S=0 \
+#     CFG=e_bp_multicore_4_cfg
+# DIFFTEST_S=1 captures observations; a semantic Pass also requires the explicit
+# public session/Spike embedding described in docs/difftest-s.md.
+# DIFFTEST_S_ONLINE=1 delivers completed monitor phases to that embedding.
+
+BP_DIFFTEST_MAKEFILE := $(abspath $(lastword $(MAKEFILE_LIST)))
+BP_RTL_DIR := $(patsubst %/,%,$(dir $(BP_DIFFTEST_MAKEFILE)))
+BP_NATIVE_DIR := $(BP_RTL_DIR)/bp_top/verilator
+
+DIFFTEST_S ?= 0
+DIFFTEST_S_SEMANTIC ?= 0
+DIFFTEST_S_ONLINE ?= 0
+DIFFTEST_S_TERMINAL ?= $(DIFFTEST_S_SEMANTIC)
+DIFFTEST_S_COHERENCE ?= $(DIFFTEST_S_SEMANTIC)
+DIFFTEST_S_DUT ?= blackparrot
+DIFFTEST_S_DIR ?= $(abspath $(BP_RTL_DIR)/../difftest-s)
+
+$(foreach option,DIFFTEST_S_SEMANTIC DIFFTEST_S_TERMINAL DIFFTEST_S_COHERENCE DIFFTEST_S_ONLINE,\
+	$(if $(filter 0 1,$($(option))),,$(error $(option) must be 0 or 1)))
+ifeq ($(DIFFTEST_S_SEMANTIC),1)
+ifneq ($(DIFFTEST_S),1)
+$(error DIFFTEST_S_SEMANTIC=1 requires DIFFTEST_S=1)
+endif
+ifneq ($(DIFFTEST_S_TERMINAL)$(DIFFTEST_S_COHERENCE),11)
+$(error semantic checking requires the terminal and coherence observation protocols)
+endif
+endif
+
+ifeq ($(DIFFTEST_S_ONLINE),1)
+ifneq ($(DIFFTEST_S_SEMANTIC),1)
+$(error DIFFTEST_S_ONLINE=1 requires DIFFTEST_S_SEMANTIC=1)
+endif
+endif
+
+ifneq ($(DIFFTEST_S),0)
+ifneq ($(DIFFTEST_S),1)
+$(error DIFFTEST_S must be 0 or 1)
+endif
+endif
+ifneq ($(DIFFTEST_S_DUT),blackparrot)
+$(error DIFFTEST_S_DUT must be blackparrot for this native build)
+endif
+
+ifneq ($(abspath $(CURDIR)),$(BP_NATIVE_DIR))
+
+.DEFAULT_GOAL := build.verilator
+.PHONY: build.verilator sim.verilator lint.verilator help
+build.verilator sim.verilator lint.verilator help:
+	+$(MAKE) -C "$(BP_NATIVE_DIR)" -f "$(BP_DIFFTEST_MAKEFILE)" $@
+
+else
+
+TOP := $(BP_RTL_DIR)
+BSG_CADENV_DIR ?= $(BP_RTL_DIR)/bsg_cadenv
+
+# Upstream expects this optional site fragment even for open-source tools.
+# Keep an existing site configuration; otherwise use the installed PATH tools.
+$(BSG_CADENV_DIR)/cadenv.mk:
+	@mkdir -p "$(@D)"
+	@printf '%s\n' '# Open-source tools selected through PATH.' > "$@"
+
+ifeq ($(DIFFTEST_S),1)
+# Prevent an enabled build from reusing a baseline binary with the same user tag.
+override TAG := $(if $(strip $(TAG)),$(strip $(TAG)).)difftest_s$(if $(filter 1,$(DIFFTEST_S_SEMANTIC)),.session)$(if $(filter 1,$(DIFFTEST_S_ONLINE)),.online)
+endif
+
+include $(BP_NATIVE_DIR)/Makefile
+
+# Propagate simulator/compiler failure through the native tee pipelines.
+.SHELLFLAGS := -o pipefail -c
+.DEFAULT_GOAL := build.verilator
+
+ifeq ($(DIFFTEST_S),1)
+# Cached generated objects can retain an older probe/class layout. Prefer a
+# direct compiler by default; callers may explicitly select an isolated cache
+# with OBJCACHE=ccache after rebuilding their generated model from scratch.
+export OBJCACHE ?=
+BP_DIFFTEST_DIR := $(DIFFTEST_S_DIR)/src/test/csrc/difftest
+BP_ADAPTER_DIR := $(BP_DIFFTEST_DIR)/adapters/blackparrot
+BP_RVWMO_DIR := $(BP_DIFFTEST_DIR)/rvwmo
+
+BP_DIFFTEST_SV_SOURCES := \
+	$(TOP)/bp_be/test/common/bp_be_nonsynth_difftest_s.sv \
+	$(TOP)/bp_be/test/common/bp_be_nonsynth_difftest_s_mem.sv
+BP_DIFFTEST_CPP_SOURCES := \
+	$(BP_ADAPTER_DIR)/adapter.cpp \
+	$(BP_ADAPTER_DIR)/native_bridge.cpp \
+	$(addprefix $(BP_RVWMO_DIR)/,stream.cpp checker_event_consumer.cpp \
+		checker.cpp memory.cpp dependency.cpp ppo.cpp lrsc.cpp order.cpp reference.cpp)
+ifeq ($(DIFFTEST_S_COHERENCE),1)
+ifneq ($(CFG),e_bp_multicore_4_cfg)
+$(error coherent publication evidence requires CFG=e_bp_multicore_4_cfg)
+endif
+HDL_DEFINES += +define+BP_DIFFTEST_S_COHERENCE
+BP_DIFFTEST_SV_SOURCES += $(TOP)/bp_be/test/common/bp_be_nonsynth_difftest_s_coherence.sv
+endif
+ifeq ($(DIFFTEST_S_TERMINAL),1)
+HDL_DEFINES += +define+BP_DIFFTEST_S_TERMINAL
+endif
+ifeq ($(DIFFTEST_S_SEMANTIC),1)
+ifeq ($(strip $(DIFFTEST_S_BOOTSTRAP_SOURCE)),)
+$(error DIFFTEST_S_SEMANTIC=1 requires DIFFTEST_S_BOOTSTRAP_SOURCE)
+endif
+ifeq ($(strip $(DIFFTEST_S_SPIKE_HOME)),)
+$(error DIFFTEST_S_SEMANTIC=1 requires DIFFTEST_S_SPIKE_HOME)
+endif
+ifeq ($(wildcard $(DIFFTEST_S_SPIKE_LIBRARY)),)
+$(error DIFFTEST_S_SPIKE_LIBRARY must name the matching BlackParrot profile library)
+endif
+HDL_DEFINES += +define+BP_DIFFTEST_S_SESSION
+ifeq ($(DIFFTEST_S_ONLINE),1)
+HDL_DEFINES += +define+BP_DIFFTEST_S_ONLINE
+endif
+BP_DIFFTEST_CPP_SOURCES += $(BP_ADAPTER_DIR)/session_adapter.cpp $(BP_ADAPTER_DIR)/host_session_adapter.cpp \
+	$(BP_RVWMO_DIR)/host_session.cpp $(BP_RVWMO_DIR)/session.cpp $(BP_RVWMO_DIR)/spike_reference_stepper.cpp \
+	$(BP_RVWMO_DIR)/spike_reference_pool.cpp $(BP_DIFFTEST_DIR)/globalmem_storage.cpp \
+	$(abspath $(DIFFTEST_S_BOOTSTRAP_SOURCE))
+VV_BUILD_OPTS += -CFLAGS "-I$(DIFFTEST_S_SPIKE_HOME)"
+VV_BUILD_OPTS += -LDFLAGS "$(abspath $(DIFFTEST_S_SPIKE_LIBRARY)) -Wl,-rpath,$(dir $(abspath $(DIFFTEST_S_SPIKE_LIBRARY)))"
+VV_RUN_OPTS += +bp_difftest_s_elf=$(abspath $(SIM_PROG))
+endif
+BP_DIFFTEST_SOURCES := $(BP_DIFFTEST_SV_SOURCES) $(BP_DIFFTEST_CPP_SOURCES)
+BP_DIFFTEST_HEADERS := $(wildcard $(BP_ADAPTER_DIR)/*.h $(BP_RVWMO_DIR)/*.h)
+
+$(foreach source,$(BP_DIFFTEST_SOURCES),\
+	$(if $(wildcard $(source)),,$(error Difftest-S source not found: $(source))))
+
+HDL_DEFINES += +define+BP_DIFFTEST_S
+VV_BUILD_OPTS += $(BP_DIFFTEST_SOURCES)
+# Verilator's native timing build already selects C++20, satisfying the host's
+# C++17 minimum without disabling the native coroutine scheduler.
+VV_BUILD_OPTS += -CFLAGS "-I$(BP_DIFFTEST_DIR) -I$(BP_DIFFTEST_DIR)/adapters -I$(BP_RVWMO_DIR)"
+
+$(BUILD_FILE): $(BP_DIFFTEST_SOURCES) $(BP_DIFFTEST_HEADERS)
+endif
+
+$(BUILD_FILE): $(BP_DIFFTEST_MAKEFILE)
+ifeq ($(DIFFTEST_S_SEMANTIC),1)
+$(BUILD_FILE): $(DIFFTEST_S_SPIKE_LIBRARY) $(DIFFTEST_S_SPIKE_HOME)/difftest/ref_api.h
+endif
+
+# Native host failure and watchdog paths call $finish and can exit zero.
+# Their log verdict must agree with the command status in either build mode.
+.PHONY: sim.verilator
+sim.verilator:
+	@if test ! -r "$(LOG_FILE)"; then \
+		echo "BlackParrot simulation verdict log is missing: $(LOG_FILE)" >&2; exit 1; \
+	fi
+	@if grep -Fq '[BSG-FAIL]' "$(LOG_FILE)"; then \
+		echo "BlackParrot simulation reported BSG-FAIL: $(LOG_FILE)" >&2; exit 1; \
+	fi
+	@if ! grep -Fq '[BSG-PASS]' "$(LOG_FILE)"; then \
+		echo "BlackParrot simulation did not report BSG-PASS: $(LOG_FILE)" >&2; exit 1; \
+	fi
+
+ifeq ($(DIFFTEST_S_SEMANTIC),1)
+	@if grep -Eq '^\[Difftest-S\] (Violation|Invalid|Unsupported|Incomplete|Error)(:|[[:space:]])' "$(LOG_FILE)"; then \
+		echo "Difftest-S rejected this native run: $(LOG_FILE)" >&2; exit 1; \
+	fi
+	@if ! grep -Eq '^\[Difftest-S\] Pass(:|[[:space:]]|$$)' "$(LOG_FILE)"; then \
+		echo "Difftest-S final Pass is missing: $(LOG_FILE)" >&2; exit 1; \
+	fi
+endif
+
+endif
