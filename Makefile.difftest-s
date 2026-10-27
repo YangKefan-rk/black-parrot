@@ -159,8 +159,8 @@ ifeq ($(DIFFTEST_S_SEMANTIC),1)
 	@if grep -Eq '^\[Difftest-S\] (Violation|Invalid|Unsupported|Incomplete|Error)(:|[[:space:]])' "$(LOG_FILE)"; then \
 		echo "Difftest-S rejected this native run: $(LOG_FILE)" >&2; exit 1; \
 	fi
-	@if ! grep -Eq '^\[Difftest-S\] Pass(:|[[:space:]]|$$)' "$(LOG_FILE)"; then \
-		echo "Difftest-S final Pass is missing: $(LOG_FILE)" >&2; exit 1; \
+	@if test "$$(grep -Ec '^\[Difftest-S\] Pass(:|[[:space:]]|$$)' "$(LOG_FILE)")" != 1; then \
+		echo "Difftest-S requires exactly one final Pass: $(LOG_FILE)" >&2; exit 1; \
 	fi
 endif
 

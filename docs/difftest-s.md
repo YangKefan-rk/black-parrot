@@ -193,7 +193,7 @@ capture-only output cannot establish a successful semantic run.
 ## Completion and supported scope
 
 A successful semantic run requires process success, `[BSG-PASS]` and an
-explicit final `[Difftest-S] Pass`. The wrapper rejects a missing verdict,
+exactly one final `[Difftest-S] Pass`. The wrapper rejects a missing verdict,
 `Violation`, `Invalid`, `Unsupported`, `Incomplete` or a simulator failure.
 An accepted batch with `Pending` is progress, not a final verdict; final Pending
 becomes Incomplete. A terminal source error invalidates any earlier cached
