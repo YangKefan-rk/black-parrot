@@ -2,8 +2,9 @@
 `include "bp_common_defines.svh"
 `include "bp_be_defines.svh"
 
-// Profile-specific proof supplement for physical store drains. This monitor
-// supplies ownership facts; retirement and public event ordering remain host work.
+// Profile-specific ownership evidence for WBUF acceptance and physical drain.
+// Retirement and public event ordering remain host work; continuous ownership
+// checks remain active until each accepted entry physically drains.
 module bp_be_nonsynth_difftest_s_coherence
  import bp_common_pkg::*;
  import bp_be_pkg::*;
@@ -17,6 +18,13 @@ module bp_be_nonsynth_difftest_s_coherence
    );
 
   import "DPI-C" context function int bp_difftest_s_coherent_drain
+    (input int unsigned hart, input longint unsigned epoch, input longint unsigned uid,
+     input int unsigned attempt, input longint unsigned source_time,
+     input longint unsigned aligned_address, input int unsigned cache_set,
+     input int unsigned cache_way, input int unsigned coherence_state,
+     input longint unsigned grant_time, input int unsigned proof_flags,
+     input int unsigned bank_select, input int unsigned physical_sram_index);
+  import "DPI-C" context function int bp_difftest_s_coherent_accept
     (input int unsigned hart, input longint unsigned epoch, input longint unsigned uid,
      input int unsigned attempt, input longint unsigned source_time,
      input longint unsigned aligned_address, input int unsigned cache_set,
@@ -99,6 +107,71 @@ module bp_be_nonsynth_difftest_s_coherence
     end
   endtask
 
+  task automatic observe_admission();
+    bp_be_dcache_wbuf_entry_s entry;
+    logic [set_width_lp-1:0] set_index;
+    logic [way_width_lp-1:0] way;
+    logic [set_width_lp+way_width_lp-1:0] target_sram_index;
+    logic [63:0] address, expected_data;
+    logic [7:0] expected_mask;
+    logic [31:0] flags, proof_flags;
+    int result;
+
+    entry = `BP_DS_OWN_DC.wbuf_entry_in;
+    set_index = entry.caddr[block_offset_width_lp+:set_width_lp];
+    way = physical_way(entry);
+    address = 64'(`BP_DS_OWN_DC.paddr_tv_r) & ~64'h7;
+    flags = `BP_DS_OWN_MEM.memory_flags(`BP_DS_OWN_DC.snoop_tv_r);
+    // This is the inferred eventual target, not an observation of an SRAM write.
+    target_sram_index = {set_index, entry.caddr[bank_offset_width_lp+:way_width_lp]};
+    expected_mask = '0;
+    expected_data = '0;
+    case ({`BP_DS_OWN_DC.decode_tv_r.double_op, `BP_DS_OWN_DC.decode_tv_r.word_op,
+           `BP_DS_OWN_DC.decode_tv_r.half_op, `BP_DS_OWN_DC.decode_tv_r.byte_op})
+      4'b1000: begin
+        expected_mask = 8'hff;
+        expected_data = `BP_DS_OWN_DC.st_data_tv_r;
+      end
+      4'b0100: begin
+        expected_mask = 8'h0f << `BP_DS_OWN_DC.paddr_tv_r[0+:3];
+        expected_data = {2{`BP_DS_OWN_DC.st_data_tv_r[0+:32]}};
+      end
+      4'b0010: begin
+        expected_mask = 8'h03 << `BP_DS_OWN_DC.paddr_tv_r[0+:3];
+        expected_data = {4{`BP_DS_OWN_DC.st_data_tv_r[0+:16]}};
+      end
+      4'b0001: begin
+        expected_mask = 8'h01 << `BP_DS_OWN_DC.paddr_tv_r[0+:3];
+        expected_data = {8{`BP_DS_OWN_DC.st_data_tv_r[0+:8]}};
+      end
+      default: begin end
+    endcase
+
+    proof_flags = '0;
+    proof_flags[0] = ordinary_scalar(flags);
+    proof_flags[1] = (&tag_known_r[set_index][way])
+      && tag_shadow_r[set_index][way].tag
+        == entry.caddr[block_offset_width_lp+set_width_lp+:dcache_tag_width_p]
+      && address == (64'(entry.caddr) & ~64'h7);
+    proof_flags[2] = (tag_shadow_r[set_index][way].state inside {e_COH_M, e_COH_E})
+      && grant_time_r[set_index][way] != 0 && grant_time_r[set_index][way] < source_time_i;
+    proof_flags[3] = $onehot(entry.bank_sel)
+      && entry.bank_sel == `BP_DS_OWN_DC.ld_data_way_select_tv
+      && target_sram_index == {`BP_DS_OWN_DC.paddr_index_tv, `BP_DS_OWN_DC.paddr_bank_tv};
+    proof_flags[4] = `BP_DS_OWN_DC.wbuf_v_li && `BP_DS_OWN_MEM.tv_identity_r.valid
+      && `BP_DS_OWN_MEM.tv_identity_r.uid != 0 && `BP_DS_OWN_MEM.tv_identity_r.attempt != 0
+      && expected_mask != 0 && entry.mask == expected_mask && entry.data == expected_data;
+    if (proof_flags !== 32'h1f)
+      $fatal(1, "Difftest-S coherent WBUF acceptance lacks all five profile proof facts");
+    result = bp_difftest_s_coherent_accept(32'(difftest_s_probe.hart_r),
+      `BP_DS_OWN_MEM.tv_identity_r.epoch, `BP_DS_OWN_MEM.tv_identity_r.uid,
+      `BP_DS_OWN_MEM.tv_identity_r.attempt, source_time_i, address, 32'(set_index), 32'(way),
+      32'(tag_shadow_r[set_index][way].state), grant_time_r[set_index][way], proof_flags,
+      32'(entry.bank_sel), 32'(target_sram_index));
+    if (result != 0)
+      $fatal(1, "Difftest-S host rejected coherent WBUF acceptance proof (status %0d)", result);
+  endtask
+
   always @(negedge clk_i) begin : observe_ownership
     bp_difftest_shadow_tag_info_s write_mask;
     bp_difftest_shadow_tag_info_s next_tag;
@@ -144,6 +217,10 @@ module bp_be_nonsynth_difftest_s_coherence
         require_exclusive_entry(`BP_DS_OWN_DC.wbuf_entry_in,
           `BP_DS_OWN_DC.wbuf_v_li
             && ordinary_scalar(`BP_DS_OWN_MEM.memory_flags(`BP_DS_OWN_DC.snoop_tv_r)));
+
+        if (`BP_DS_OWN_DC.wbuf_v_li
+            && ordinary_scalar(`BP_DS_OWN_MEM.memory_flags(`BP_DS_OWN_DC.snoop_tv_r)))
+          observe_admission();
 
         if (`BP_DS_OWN_DC.wbuf_yumi_li) begin
           outgoing_entry = `BP_DS_OWN_DC.wbuf_entry_out;

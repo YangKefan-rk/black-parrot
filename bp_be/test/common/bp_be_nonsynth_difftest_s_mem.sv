@@ -2,8 +2,8 @@
 `include "bp_common_defines.svh"
 `include "bp_be_defines.svh"
 
-// Private physical-source observations. SRAM drain is a candidate, not a GMO
-// claim: the host must qualify publication against the selected protocol.
+// Private physical-source observations. The host qualifies publication against
+// the selected protocol; accepted misses retain their bytes before WBUF entry.
 module bp_be_nonsynth_difftest_s_mem
  import bp_common_pkg::*;
  import bp_be_pkg::*;
@@ -118,6 +118,16 @@ module bp_be_nonsynth_difftest_s_mem
       outgoing_address = `BP_DS_DC.wbuf.mux1_sel ? wbuf_address1_r : incoming_address;
       flags = memory_flags(`BP_DS_DC.snoop_tv_r);
       outgoing_flags = `BP_DS_DC.wbuf.mux1_sel ? wbuf_flags1_r : flags;
+
+      // A committed miss can precede WBUF entry; this fact is not publication.
+      if (`BP_DS_DC.blocking_sent && `BP_DS_DC.store_req && ((flags & ~32'h8) === 32'h0)) begin
+        if (!tv_identity_r.valid)
+          $fatal(1, "Difftest-S accepted store miss has no dynamic identity");
+        require_success(bp_difftest_s_memory(32'(difftest_s_probe.hart_r),
+          tv_identity_r.epoch, tv_identity_r.uid, tv_identity_r.attempt,
+          source_time_i, 4, incoming_address, `BP_DS_DC.wbuf_entry_in.data,
+          32'(`BP_DS_DC.wbuf_entry_in.mask), 0, 0, 0, flags));
+      end
 
       if (`BP_DS_DC.wbuf_v_li) begin
         if (!tv_identity_r.valid && !`BP_DS_DC.decode_tv_r.ptw_op)

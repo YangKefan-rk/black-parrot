@@ -213,14 +213,27 @@ point, vector or split accesses, cache-block/MMIO effects, and trap/interrupt
 architecture are outside the current scalar contract. Unsupported source
 shapes remain explicit Unsupported or Incomplete.
 
+Ordinary cached scalar stores publish logically at certified WBUF acceptance,
+not at the earlier permission grant or the later SRAM drain. Hit stores keep a
+provisional REF-audit record and publish without waiting in LocalMem; stores
+that retire while their miss is outstanding remain local until replay is
+accepted by WBUF. Both paths retain per-byte writer identity and independent
+REF address/data/mask audit. Physical drain and continuous ownership/coherence
+checks remain mandatory before final success. Use matching updated RTL probes
+and the BlackParrot host adapter: the private admission and accepted-miss
+records are required in addition to the existing drain records.
+
 Core and cache observations retain their common even/odd half-cycle ticks.
 Equal-tick observations from distinct producers do not acquire order from
 callback sequence, producer IDs or instruction IDs. A sample/retirement tie,
 ambiguous groups containing writes and mixed forwarding can remain Incomplete.
 A private stable-byte certificate can establish an order window for an
 ordinary SRAM load across an older W-to-R FENCE only after source closure and
-absence of any hart's overlapping store-input or store-drain transition.
-Fully forwarded loads crossing the preceding store-publication boundary,
+absence of any hart's overlapping logical store-input transition.
+A tied current-input forwarding sample can use a strictly later model point
+inside a closed stable-writer interval after each affected byte writer is
+independently matched. This does not invent a cross-hart ordering phase.
+Fully forwarded loads crossing a later preceding store-publication boundary,
 missing evidence and uncertified intervals remain Incomplete/Unsupported.
 The certificate covers the supported scalar window, not every FENCE
 combination or a complete coherence-protocol proof.
