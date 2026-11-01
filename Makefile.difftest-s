@@ -1,21 +1,31 @@
 # Build the native baseline from the RTL checkout:
 #   make -f Makefile.difftest-s build.verilator DIFFTEST_S=0 \
 #     CFG=e_bp_multicore_4_cfg
-# DIFFTEST_S=1 captures observations; a semantic Pass also requires the explicit
-# public session/Spike embedding described in docs/difftest-s.md.
-# DIFFTEST_S_ONLINE=1 delivers completed monitor phases to that embedding.
+# DIFFTEST_S=1 enables the in-tree four-hart session and online checking.
+# Explicit DIFFTEST_S_SEMANTIC=0 retains observation-only builds.
+# See docs/difftest-s.md for the compatible Spike reference library.
 
 BP_DIFFTEST_MAKEFILE := $(abspath $(lastword $(MAKEFILE_LIST)))
 BP_RTL_DIR := $(patsubst %/,%,$(dir $(BP_DIFFTEST_MAKEFILE)))
 BP_NATIVE_DIR := $(BP_RTL_DIR)/bp_top/verilator
 
 DIFFTEST_S ?= 0
-DIFFTEST_S_SEMANTIC ?= 0
-DIFFTEST_S_ONLINE ?= 0
+DIFFTEST_S_SEMANTIC ?= $(DIFFTEST_S)
+DIFFTEST_S_ONLINE ?= $(DIFFTEST_S_SEMANTIC)
 DIFFTEST_S_TERMINAL ?= $(DIFFTEST_S_SEMANTIC)
 DIFFTEST_S_COHERENCE ?= $(DIFFTEST_S_SEMANTIC)
 DIFFTEST_S_DUT ?= blackparrot
 DIFFTEST_S_DIR ?= $(abspath $(BP_RTL_DIR)/../difftest-s)
+DIFFTEST_S_SPIKE_HOME ?= $(abspath $(BP_RTL_DIR)/../Spike)
+DIFFTEST_S_SPIKE_BUILD ?= $(DIFFTEST_S_SPIKE_HOME)/difftest/build/BLACKPARROT
+DIFFTEST_S_SPIKE_LIBRARY ?= $(DIFFTEST_S_SPIKE_BUILD)/riscv64-spike-ref-api.so
+BP_DEFAULT_BOOTSTRAP := $(DIFFTEST_S_DIR)/src/test/csrc/difftest/adapters/blackparrot/native_session.cpp
+DIFFTEST_S_BOOTSTRAP_SOURCE ?= $(BP_DEFAULT_BOOTSTRAP)
+
+.PHONY: ref
+ref:
+	+$(MAKE) -C "$(DIFFTEST_S_SPIKE_HOME)/difftest" CPU=BLACKPARROT MULTICORE_DIFF=1 \
+		PURE_API=1 DEBUG= BUILD_DIR="$(abspath $(DIFFTEST_S_SPIKE_BUILD))"
 
 $(foreach option,DIFFTEST_S_SEMANTIC DIFFTEST_S_TERMINAL DIFFTEST_S_COHERENCE DIFFTEST_S_ONLINE,\
 	$(if $(filter 0 1,$($(option))),,$(error $(option) must be 0 or 1)))
@@ -107,14 +117,20 @@ ifeq ($(strip $(DIFFTEST_S_SPIKE_HOME)),)
 $(error DIFFTEST_S_SEMANTIC=1 requires DIFFTEST_S_SPIKE_HOME)
 endif
 ifeq ($(wildcard $(DIFFTEST_S_SPIKE_LIBRARY)),)
-$(error DIFFTEST_S_SPIKE_LIBRARY must name the matching BlackParrot profile library)
+$(error matching BlackParrot reference library not found; run make -f Makefile.difftest-s ref or set DIFFTEST_S_SPIKE_LIBRARY)
+endif
+ifeq ($(abspath $(DIFFTEST_S_BOOTSTRAP_SOURCE)),$(abspath $(BP_DEFAULT_BOOTSTRAP)))
+ifneq ($(DIFFTEST_S_ONLINE),1)
+$(error the in-tree native session requires DIFFTEST_S_ONLINE=1)
+endif
 endif
 HDL_DEFINES += +define+BP_DIFFTEST_S_SESSION
 ifeq ($(DIFFTEST_S_ONLINE),1)
 HDL_DEFINES += +define+BP_DIFFTEST_S_ONLINE
 endif
 BP_DIFFTEST_CPP_SOURCES += $(BP_ADAPTER_DIR)/session_adapter.cpp $(BP_ADAPTER_DIR)/host_session_adapter.cpp \
-	$(BP_RVWMO_DIR)/host_session.cpp $(BP_RVWMO_DIR)/session.cpp $(BP_RVWMO_DIR)/spike_reference_stepper.cpp \
+	$(BP_RVWMO_DIR)/host_session.cpp $(BP_RVWMO_DIR)/session.cpp $(BP_RVWMO_DIR)/memory_image.cpp \
+	$(BP_RVWMO_DIR)/spike_reference_stepper.cpp \
 	$(BP_RVWMO_DIR)/spike_reference_pool.cpp $(BP_DIFFTEST_DIR)/globalmem_storage.cpp \
 	$(abspath $(DIFFTEST_S_BOOTSTRAP_SOURCE))
 VV_BUILD_OPTS += -CFLAGS "-I$(DIFFTEST_S_SPIKE_HOME)"

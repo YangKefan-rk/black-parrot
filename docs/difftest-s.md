@@ -4,7 +4,8 @@
 `bp_top/verilator` testbench with optional Difftest-S observations and semantic
 checking. Difftest-S is disabled by default (`DIFFTEST_S=0`). The enabled path
 uses the shared Difftest-S `HostSession`, independent Spike references and
-memory-order checker.
+memory-order checker. With `DIFFTEST_S=1`, semantic and online checking are
+enabled by default; the native session implementation comes from Difftest-S.
 
 The semantic profile is the synchronous `e_bp_multicore_4_cfg`: four harts,
 FSM coherence, writeback data caches and 64-bit memory observations. The
@@ -27,8 +28,8 @@ Provide these dependencies before building:
   requires its RISC-V compiler/assembler; a prebuilt ELF does not require the
   full BlackParrot SDK.
 - For semantic checking, a compatible Spike source tree or SDK containing
-  `difftest/ref_api.h`, a matching BlackParrot profile library, and the caller
-  bootstrap source described below. Building that Spike library requires its
+  `difftest/ref_api.h` and a matching BlackParrot profile library. The default
+  bootstrap is included in Difftest-S. Building that Spike library requires its
   C/C++ build tools and `device-tree-compiler` (`dtc`).
 
 Initialize the RTL submodules with:
@@ -78,7 +79,33 @@ The BlackParrot reference profile uses
 supports the scalar subset described below. Keep the matching reference
 profile when reporting unsupported hardware instructions.
 
-## Caller bootstrap contract
+## Included native session
+
+The default `DIFFTEST_S_BOOTSTRAP_SOURCE` is the production
+`adapters/blackparrot/native_session.cpp` in Difftest-S. No caller-supplied
+bootstrap or acceptance-test directory is required. This implementation loads
+ELF segments and BSS independently into GlobalMem, creates four BlackParrot
+Spike handles, and delivers final load attempts and retirements to the common
+HostSession. The required references, producer watermarks, store audits,
+terminal boundaries and physical drains remain checked through the final verdict.
+
+The native reset profile starts at `0x80000000` in M mode, uses the platform
+reset CSR/interrupt state, and checks an ELF prologue containing the 31
+uncompressed `addi x1,x0,0` through `addi x31,x0,0` instructions. This is an
+explicit initialization contract because the DUT's GPR SRAM has no reset;
+reference zeros are not substituted for unknown DUT register contents.
+Unsupported startup images fail before observation capture. All four harts
+must follow the stopped-and-drained completion protocol described below.
+
+For reproducible HartBreaker generation and the matching four-hart target,
+see [HartBreaker integration](hartbreaker.md). The same native session accepts
+other scalar ELF programs satisfying the initialization and completion contract.
+
+## Advanced caller bootstrap contract
+
+A custom embedding can override the included implementation. Its source must
+preserve the independent state, lifetime and completion guarantees below.
+
 
 Set `DIFFTEST_S_BOOTSTRAP_SOURCE` to one caller-owned C++ translation unit
 providing:
@@ -153,26 +180,27 @@ The bridge rejects repeated installation or installation after probe startup.
 
 ## Build and run
 
-Set absolute paths to the prepared dependencies and caller inputs. Use an ELF
-whose initialization, instructions and terminal behavior satisfy the contract
-above. This example selects online checking:
+Set absolute paths to the prepared dependencies and program. Use an ELF whose
+initialization, instructions and terminal behavior satisfy the contract above.
+This example builds the reference library and enables online checking:
 
 ```bash
 BP_RTL=/absolute/path/to/black-parrot
 DIFFTEST_ROOT=/absolute/path/to/difftest-s
 SPIKE_HOME=/absolute/path/to/spike-with-difftest-handle-api
 SPIKE_BUILD=/absolute/path/to/blackparrot-spike-build
-BOOTSTRAP=/absolute/path/to/caller_bootstrap.cpp
 PROGRAM=/absolute/path/to/program.riscv
+
+make -C "$BP_RTL" -f Makefile.difftest-s ref \
+  DIFFTEST_S_SPIKE_HOME="$SPIKE_HOME" DIFFTEST_S_SPIKE_BUILD="$SPIKE_BUILD"
 
 make -C "$BP_RTL" -f Makefile.difftest-s \
   build.verilator sim.verilator \
   CFG=e_bp_multicore_4_cfg TAG=checked_program \
-  DIFFTEST_S=1 DIFFTEST_S_SEMANTIC=1 DIFFTEST_S_ONLINE=1 \
+  DIFFTEST_S=1 \
   DIFFTEST_S_DIR="$DIFFTEST_ROOT" \
   DIFFTEST_S_SPIKE_HOME="$SPIKE_HOME" \
   DIFFTEST_S_SPIKE_LIBRARY="$SPIKE_BUILD/riscv64-spike-ref-api.so" \
-  DIFFTEST_S_BOOTSTRAP_SOURCE="$BOOTSTRAP" \
   SIM_PROG="$PROGRAM" OBJCOPY=riscv64-unknown-elf-objcopy \
   VERILATOR_THREADS=4 OBJCACHE=
 ```
@@ -186,9 +214,11 @@ or build options. An explicit `OBJCACHE=ccache` opt-in requires an isolated,
 validated cache.
 
 For the native baseline, select `DIFFTEST_S=0` with a suitable native program.
-`DIFFTEST_S=1` alone enables observation capture; it does not install a semantic
-verifier. The native finish API rejects a run without a finalized verifier, so
-capture-only output cannot establish a successful semantic run.
+Explicit `DIFFTEST_S=1 DIFFTEST_S_SEMANTIC=0 DIFFTEST_S_ONLINE=0` selects
+observation capture without a semantic verifier. The native finish API rejects
+a run without a finalized verifier, so capture-only output cannot establish a
+successful semantic run. The included session requires online delivery; a custom
+caller bootstrap is required for terminal capture/replay mode.
 
 ## Completion and supported scope
 
