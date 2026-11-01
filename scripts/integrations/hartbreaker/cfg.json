@@ -1,0 +1,21 @@
+{
+  "misaligned_data_supported": false,
+  "privlvs": "m",
+  "mmu": "",
+  "marchflags": "-march=rv64imc_zicsr_zifencei -mabi=lp64",
+  "bootaddr": "0x80000000",
+  "simname": "",
+  "hartids": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "corename": "blackparrot",
+  "wfi_u_mode": false,
+  "simulator": "blackparrot",
+  "medeleg": "0x0",
+  "mideleg": "0x0",
+  "clint": "0x300000",
+  "rvext": []
+}

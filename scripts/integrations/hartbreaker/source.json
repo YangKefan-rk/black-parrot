@@ -1,0 +1,26 @@
+{
+  "upstream": "https://github.com/comsec-group/hartbreaker.git",
+  "upstream_revision": "414d2f52022d7c4a915ef9950ac42bba999a2910",
+  "adapted_revision": "b0620789ded632f719f7eafe1cee5bb0485ee3f2",
+  "design": "blackparrot-fourhart-difftest-s",
+  "patch_sha256": "4085db04d90ca43124683b29dfa675ecd8f9015f5d13e849ee5770d810c2f1b4",
+  "adapted_files": {
+    "hartattack/hartattack/fuzzdesign.py": "025f3b2a322b35fc7842353bc32325705fc10b7321ba663d175cb45a5a952805",
+    "hartattack/hartattack/genelf/elf_template/main.S": "d98666a512ef63c4a4547b1e4cd196d6add742a8a3d779cd53c64b1dba6be6d7",
+    "hartattack/hartattack/params/get_designparams.py": "625e00eb8b3367e5233d4dccbdda246897163ad8c35e37a0912363d7a7d35a4f",
+    "hartattack/hartattack/params/testparams.py": "de277bfe8e19be3bec79e22ffc1d81360f07a35149fccc0919b562eb57621cc0",
+    "hartattack/hartattack/preisasim/spike.py": "7f215d1cb1ccaebf184d11a74cd0803fb65c9ca42614b9c39601eb31d7c34b6d",
+    "hartattack/hartattack/proggen/gen_testcase.py": "ca429b8b6537bbda4ab568a089c2c5fdc6bb8891588a09500f92769a4a6760a2",
+    "hartattack/hartattack/proggen/pickinstr/pickinstrtype.py": "13620d19c061e7360781a87db6a9b71b6fb0bc257222f529de2f1660ba0a0a1f",
+    "hartattack/hartattack/proggen/util/createinst.py": "436556e1235a084eda0d165b2b58e397793dd8dd57d7df4efe4d633135870677",
+    "hartattack/hartattack/rtlsim/blackparrot.py": "066941e3027b89bce548c097901276f64ea7f9419b420d1aeb4281afabbe9672",
+    "hartattack/hartattack/rtlsim/parsesim.py": "441ac82b2466c123a1967c649c8fc4de5df20a0d1f48aee6b7d263854d9996bb",
+    "hartattack/hartattack/states/corestate.py": "8841567c3abc68ba5d6213996e3dbf83b96183ee1f15ff220fada410107245f1",
+    "hartattack/hartattack/states/fuzzerstate.py": "a9313193a68c7358201ff410b11646f4369ebbb9e3dae3c2c7ee8661b61c1c00",
+    "hartattack/hartattack/staticblocks/blackparrot_sync.py": "3b3284c0487181ca9617db0c132850e095be3d806f3185b3e230f067406177af",
+    "hartattack/hartattack/staticblocks/finalblock.py": "476757c9a717643f0e793bb07b795cdb5262f8ce8b128428db52ce9004350709",
+    "hartattack/hartattack/staticblocks/initialblock.py": "91e16ef5aac979e4a24925e0e1bcf652b96be8d90e178be3cb8fe3a2fc4964f4",
+    "hartattack/hartattack/staticblocks/mcmresethandler.py": "661e4563bca88ad1e269e394bf1c83a443caed005557894f2795ae3892c3446a"
+  },
+  "patch_format": "zero-context Git diff; apply with --unidiff-zero after pinned-revision checks"
+}

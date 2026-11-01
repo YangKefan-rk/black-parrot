@@ -1,0 +1,607 @@
+diff --git a/hartattack/hartattack/fuzzdesign.py b/hartattack/hartattack/fuzzdesign.py
+index e9d011af415f8cded1f61312f864d6fe0d342a7a..2e88a036a379dedbdec0b57eed53b182a9076fc6 100644
+--- a/hartattack/hartattack/fuzzdesign.py
++++ b/hartattack/hartattack/fuzzdesign.py
+@@ -169 +169,3 @@ class FuzzDesign:
+-        test_params = [self._gen_test_instance(i) for i in range(num_elfs)]
++        test_params = [
++            self._gen_test_instance(self.seed_offset + i) for i in range(num_elfs)
++        ]
+diff --git a/hartattack/hartattack/genelf/elf_template/main.S b/hartattack/hartattack/genelf/elf_template/main.S
+index 1a01c18c8e448557d980a750ce7bb806f432d76e..ea17ef5346c7053b9ce8b8e25362945f8ff06e62 100644
+--- a/hartattack/hartattack/genelf/elf_template/main.S
++++ b/hartattack/hartattack/genelf/elf_template/main.S
+@@ -22,0 +23,5 @@ coresync_addrs:
++// Dedicated BlackParrot target state: release, stop, four arrival and done slots.
++// Keep the byte count/address in staticblocks/blackparrot_sync.py synchronized.
++    .globl blackparrot_sync
++blackparrot_sync:
++    .zero 80
+diff --git a/hartattack/hartattack/params/get_designparams.py b/hartattack/hartattack/params/get_designparams.py
+index 5e0d01b7f9ee04e7c3bad2f4e04fee3f0855d0d3..c75bdf6062d5c29871aa1bb19825a777f7dbc50d 100644
+--- a/hartattack/hartattack/params/get_designparams.py
++++ b/hartattack/hartattack/params/get_designparams.py
+@@ -126,7 +126,3 @@ def get_design_march_flags_nocompressed(design_name) -> str:
+-    return (
+-        get_design_march_ccflags(design_name)
+-        .split("-march=")[1]
+-        .split(" ")[0]
+-        .lower()
+-        .replace("c", "")
+-    )
++    # C is a single-letter base extension; Zicsr/Zifencei must remain intact.
++    base, *extensions = get_design_march_flags(design_name).split("_")
++    return "_".join([base.replace("c", ""), *extensions])
+@@ -145,0 +142,4 @@ def is_design_32bit(design_name) -> bool:
++def _base_extensions(design_name: str) -> str:
++    return get_design_march_flags(design_name).split("_", 1)[0]
++
++
+@@ -148,3 +148,2 @@ def f_ext_support(design_name) -> bool:
+-    return "f" in get_design_march_flags(design_name) or "g" in get_design_march_flags(
+-        design_name
+-    )
++    base = _base_extensions(design_name)
++    return "f" in base or "g" in base
+@@ -155,3 +154,2 @@ def d_ext_support(design_name) -> bool:
+-    return "d" in get_design_march_flags(design_name) or "g" in get_design_march_flags(
+-        design_name
+-    )
++    base = _base_extensions(design_name)
++    return "d" in base or "g" in base
+@@ -162,3 +160,2 @@ def m_ext_support(design_name) -> bool:
+-    return "m" in get_design_march_flags(design_name) or "g" in get_design_march_flags(
+-        design_name
+-    )
++    base = _base_extensions(design_name)
++    return "m" in base or "g" in base
+@@ -169,3 +166,2 @@ def a_ext_support(design_name) -> bool:
+-    return "a" in get_design_march_flags(design_name) or "g" in get_design_march_flags(
+-        design_name
+-    )
++    base = _base_extensions(design_name)
++    return "a" in base or "g" in base
+@@ -176 +172 @@ def c_ext_support(design_name: str) -> bool:
+-    return "c" in get_design_march_flags(design_name)
++    return "c" in _base_extensions(design_name)
+@@ -231 +227,4 @@ def pmp_support(design_name) -> bool:
+-    if design_name in ("picorv32", "toooba", "toooba-3core", "naxriscv", "vexiiriscv"):
++    if design_name in (
++        "picorv32", "toooba", "toooba-3core", "naxriscv", "vexiiriscv",
++        "blackparrot-fourhart-difftest-s",  # e_bp_multicore_4_cfg inherits num_pmp=0
++    ):
+diff --git a/hartattack/hartattack/params/testparams.py b/hartattack/hartattack/params/testparams.py
+index 163eba641c6d882f01a2a10486de127e7caa322e..031bda6db151ca36f8424941bf6655611d05dac2 100644
+--- a/hartattack/hartattack/params/testparams.py
++++ b/hartattack/hartattack/params/testparams.py
+@@ -23,0 +24 @@ class SimulatorEnum(Enum):
++    BLACKPARROT = auto()
+@@ -114,0 +116,2 @@ class TestParams:
++            case "blackparrot":
++                self.simulator = SimulatorEnum.BLACKPARROT
+@@ -219,0 +223,9 @@ class TestParams:
++            if self.design_name == "blackparrot-fourhart-difftest-s" and isaclass not in {
++                ISAInstrClass.REGFSM, ISAInstrClass.ALU, ISAInstrClass.ALU64,
++                ISAInstrClass.MULDIV, ISAInstrClass.MULDIV64, ISAInstrClass.JAL,
++                ISAInstrClass.JALR, ISAInstrClass.BRANCH, ISAInstrClass.MEM,
++                ISAInstrClass.MEM64, ISAInstrClass.FENCE, ISAInstrClass.FREE_POLLUTED,
++                ISAInstrClass.CREATE_ADDR_DEP, ISAInstrClass.RESET_MCM,
++            }:
++                # This target exercises the native adapter's bare scalar profile.
++                booster = 0
+diff --git a/hartattack/hartattack/preisasim/spike.py b/hartattack/hartattack/preisasim/spike.py
+index 0da4b1fe15a39dee675ab0def68133a666bbe3bf..23a24a40522bc5166d7268d082be344e0996a46a 100644
+--- a/hartattack/hartattack/preisasim/spike.py
++++ b/hartattack/hartattack/preisasim/spike.py
+@@ -47,0 +48,2 @@ def _gen_presim_dbgcmdfile(
++    *,
++    has_fpu: bool = True,
+@@ -61 +63 @@ def _gen_presim_dbgcmdfile(
+-        num_fp_regs: the number of floating point registers
++        has_fpu: whether floating point register commands are supported
+@@ -80,0 +83,2 @@ def _gen_presim_dbgcmdfile(
++        if is_float_req and not has_fpu:
++            raise ValueError("floating register requested for a no-FPU profile")
+@@ -94,3 +98,3 @@ def _gen_presim_dbgcmdfile(
+-        floatregs = list(FloatReg)
+-        for fp_reg in floatregs:
+-            spike_debug_commands.append(f"freg {hartid} {FPREG_ABINAMES[fp_reg.value]}")
++        if has_fpu:
++            for fp_reg in FloatReg:
++                spike_debug_commands.append(f"freg {hartid} {FPREG_ABINAMES[fp_reg.value]}")
+@@ -163 +167 @@ def _run_spike_with_debugcmd(
+-        spike_out = subprocess.run(
++        completed = subprocess.run(
+@@ -167 +171,2 @@ def _run_spike_with_debugcmd(
+-        ).stderr
++        )
++        spike_out = completed.stderr
+@@ -172,0 +178,6 @@ def _run_spike_with_debugcmd(
++    if not spike_out or completed.returncode != 0:
++        raise RuntimeError(
++            f"Spike returned {completed.returncode} for {identifier_str}: "
++            f"{spike_out.decode(errors='replace')[-1600:]}"
++        )
++
+@@ -202 +213 @@ def _parse_regdumps(
+-    while not spike_out[0].startswith(b"0x"):
++    while spike_out and not spike_out[0].startswith(b"0x"):
+@@ -205 +216,7 @@ def _parse_regdumps(
+-    assert len(final_intreg_vals) == TOTAL_NUM_INTREGS
++    if len(final_intreg_vals) != TOTAL_NUM_INTREGS:
++        raise ValueError(f"expected {TOTAL_NUM_INTREGS} integer register values, got {len(final_intreg_vals)}")
++
++    if not fp_regs:
++        if spike_out:
++            raise ValueError("unexpected floating register output for a no-FPU profile")
++        return (final_intreg_vals, final_fpureg_vals, final_fpureg_archvals)
+@@ -207,8 +224,7 @@ def _parse_regdumps(
+-    if fp_regs:
+-        for dumped_val in spike_out:
+-            if has_fpdouble_support:
+-                final_fpureg_vals += _get_hex_val(dumped_val, 16)
+-            else:
+-                final_fpureg_vals += _get_hex_val(dumped_val, 24)
+-            if dump_freg_format != "":
+-                final_fpureg_archvals.append(dumped_val)
++    for dumped_val in spike_out:
++        if has_fpdouble_support:
++            final_fpureg_vals += _get_hex_val(dumped_val, 16)
++        else:
++            final_fpureg_vals += _get_hex_val(dumped_val, 24)
++        if dump_freg_format != "":
++            final_fpureg_archvals.append(dumped_val)
+@@ -216 +232,2 @@ def _parse_regdumps(
+-    assert len(final_fpureg_vals) == MAX_NUM_PICKABLE_FLOATREGS
++    if len(final_fpureg_vals) != MAX_NUM_PICKABLE_FLOATREGS:
++        raise ValueError(f"expected {MAX_NUM_PICKABLE_FLOATREGS} floating register values, got {len(final_fpureg_vals)}")
+@@ -277,0 +295 @@ def asymmetric_isa_presim(
++        has_fpu=fp_regs,
+diff --git a/hartattack/hartattack/proggen/gen_testcase.py b/hartattack/hartattack/proggen/gen_testcase.py
+index a634e5f38d31ae11aa294b79c7c390c2d448c4f8..fb9ac9c075f07fe416ef703d49ca063a79253c5d 100644
+--- a/hartattack/hartattack/proggen/gen_testcase.py
++++ b/hartattack/hartattack/proggen/gen_testcase.py
+@@ -55,5 +55,6 @@ class TestCaseGenerator:
+-        self.corestates: dict[int, "CoreState"] = {}
+-        for hartid in test_params.hartids:
+-            self.corestates[hartid] = CoreState(test_params, hartid)
+-        self.num_addr_regs = self.get_num_addr_registers(
+-            self.fuzzerstate.num_store_locs
++        self.blackparrot_shared_addr_regs = (
++            tuple(test_params.prng.sample(
++                list(IntReg)[1:MAX_NUM_PICKABLE_INTREGS + 1],
++                self.fuzzerstate.num_store_locs,
++            )) if test_params.design_name == "blackparrot-fourhart-difftest-s"
++               and runparams.USE_ADDR_REGS else ()
+@@ -60,0 +62 @@ class TestCaseGenerator:
++        self.corestates: dict[int, "CoreState"] = {}
+@@ -62 +64,13 @@ class TestCaseGenerator:
+-            self.corestates[hartid].pick_addr_regs(self.num_addr_regs, test_params.prng)
++            self.corestates[hartid] = CoreState(
++                test_params, hartid, reserved_addr_regs=self.blackparrot_shared_addr_regs
++            )
++        if self.blackparrot_shared_addr_regs:
++            self.num_addr_regs = len(self.blackparrot_shared_addr_regs)
++            for core in self.corestates.values():
++                core.addr_regs = list(self.blackparrot_shared_addr_regs)
++        else:
++            self.num_addr_regs = self.get_num_addr_registers(
++                self.fuzzerstate.num_store_locs
++            )
++            for hartid in test_params.hartids:
++                self.corestates[hartid].pick_addr_regs(self.num_addr_regs, test_params.prng)
+@@ -370 +384,2 @@ class TestCaseGenerator:
+-        if runparams.DEBUG_RTL:
++        is_blackparrot = test_params.design_name == "blackparrot-fourhart-difftest-s"
++        if runparams.DEBUG_RTL and not is_blackparrot:
+@@ -371,0 +387,4 @@ class TestCaseGenerator:
++        # The BlackParrot termination protocol differs from Spike's even when
++        # both use the same CLINT base; always put its RTL final block in the ELF.
++        if is_blackparrot or test_params.clint_addr != SPIKE_CLINT_BASE:
++            gen_finalblock(self.fuzzerstate, test_params, is_rtl=True)
+@@ -374 +392,0 @@ class TestCaseGenerator:
+-            gen_finalblock(self.fuzzerstate, test_params, is_rtl=True)
+@@ -524,0 +543,4 @@ class TestCaseGenerator:
++        if self.blackparrot_shared_addr_regs:
++            mappings = [core.get_reg_to_addr_mapping() for core in self.corestates.values()]
++            if any(mapping != mappings[0] for mapping in mappings):
++                raise ValueError('BlackParrot address registers differ across shared-init harts')
+diff --git a/hartattack/hartattack/proggen/pickinstr/pickinstrtype.py b/hartattack/hartattack/proggen/pickinstr/pickinstrtype.py
+index 92b7062962700bcdc003b9b8b0ad0a01dad2a5e9..27d7472e9d549958644d32b01412f6fa85c94328 100644
+--- a/hartattack/hartattack/proggen/pickinstr/pickinstrtype.py
++++ b/hartattack/hartattack/proggen/pickinstr/pickinstrtype.py
+@@ -164,0 +165,4 @@ def gen_next_instrstr_from_isaclass(
++    if test_params.design_name == "blackparrot-fourhart-difftest-s" and isaclass == ISAInstrClass.FENCE:
++        # Instruction-cache synchronization is outside this scalar data-memory profile.
++        instr_proba["fence.i"] = 0
++
+diff --git a/hartattack/hartattack/proggen/util/createinst.py b/hartattack/hartattack/proggen/util/createinst.py
+index 23cff3eb785227619393ae54220003ffd4f66ab7..b2d8b688992855ad634859c6d3d7673bb0fe6eb7 100644
+--- a/hartattack/hartattack/proggen/util/createinst.py
++++ b/hartattack/hartattack/proggen/util/createinst.py
+@@ -180,3 +180,2 @@ def _create_jalrinstr(
+-def _create_fenceinstr(instr_str: str, iscompressed: bool, prng: Random):
+-    f_ord = list(FenceOrdering)
+-    fence_ordering = prng.choice(f_ord)
++def _create_fenceinstr(instr_str: str, iscompressed: bool, prng: Random, orderings=None):
++    fence_ordering = prng.choice(list(FenceOrdering) if orderings is None else orderings)
+@@ -503 +502 @@ def create_instr(
+-        ret = [_create_fenceinstr(instr_str, iscompressed, prng)]
++        ret = [_create_fenceinstr(instr_str, iscompressed, prng, fuzzerstate.fence_orderings)]
+diff --git a/hartattack/hartattack/rtlsim/blackparrot.py b/hartattack/hartattack/rtlsim/blackparrot.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b44ad060d49dbdfe2109635248d306417aa76c5d
+--- /dev/null
++++ b/hartattack/hartattack/rtlsim/blackparrot.py
+@@ -0,0 +1,105 @@
++# Copyright 2026 Flavien Solt, Quentin Bordier ETH Zurich.
++# Licensed under the General Public License, Version 3.0, see LICENSE for details.
++# SPDX-License-Identifier: GPL-3.0-only
++"""Native retired-load outcomes for the restricted four-hart BlackParrot target.
++
++Input is BP_DIFFTEST_S_TRACE TSV, never the Difftest-S verdict. A complete native
++source closure and one final WFI per hart are required. H still runs HartBreaker's
++own MCM/Dat3M verifier after this parser; parsing is not a memory-model verdict.
++"""
++from ..mcm.memops import Amo, Load
++
++BOOT = 0x80000000
++
++
++def _expected_loads(corestates, mcmstate):
++    loads = {}
++    for step in mcmstate.steps:
++        for hart, operations in step.step_memops.items():
++            for operation in operations.values():
++                if isinstance(operation, Amo):
++                    raise ValueError('BlackParrot scalar outcome parser does not support AMO')
++                if not isinstance(operation, Load):
++                    continue
++                pc = operation.exec_addr + BOOT
++                if pc in loads:
++                    raise ValueError('MCM outcome PC is not unique across harts/steps')
++                bb, index = operation.instr_coord
++                instruction = corestates[hart].basic_blocks[bb][index]
++                rd = instruction.rd.value
++                if rd == 0:
++                    raise ValueError('MCM load to x0 has no native architectural result')
++                loads[pc] = (hart, rd, instruction.gen_bytecode_int(False))
++    if set(loads) != set(mcmstate.get_all_load_addrs()):
++        raise ValueError('MCM expected load set cannot be bound to original instruction metadata')
++    return loads
++
++
++def parse_blackparrot_trace(lines, corestates, mcmstate):
++    if set(corestates) != set(range(4)):
++        raise ValueError('BlackParrot parser requires exactly harts 0..3')
++    expected = _expected_loads(corestates, mcmstate)
++    registers = {hart: [0] * 32 for hart in corestates}
++    counts = {hart: 0 for hart in corestates}
++    initialized, closed, identities, observed = set(), set(), set(), {}
++    terminal = {hart: False for hart in corestates}
++    prefix_closed = False
++    for line in lines:
++        fields = line.strip().split('\t')
++        kind = fields[0]
++        if kind in ('TRAP', 'ERROR'):
++            raise ValueError('native BlackParrot trace contains a trap or transport error')
++        if kind == 'INIT':
++            if len(fields) != 3:
++                raise ValueError('malformed native INIT')
++            hart, total = map(int, fields[1:])
++            if total != 4 or hart not in registers or counts[hart]:
++                raise ValueError('native hart initialization/reset differs from the fixed roster')
++            initialized.add(hart)
++        elif kind == 'RETIRE':
++            if len(fields) != 13:
++                raise ValueError('malformed native RETIRE')
++            hart, epoch, uid, attempt, tick, pc, raw, length, rd, write, fp, value = map(int, fields[1:])
++            identity = (hart, epoch, uid)
++            if (hart not in initialized or hart in closed or prefix_closed or terminal[hart] or
++                min(epoch, uid, attempt) <= 0 or tick < 0 or length not in (2, 4) or
++                not 0 <= rd < 32 or write not in (0, 1) or fp != 0 or not 0 <= value < 1 << 64 or
++                identity in identities):
++                raise ValueError('invalid, duplicate, post-terminal, or floating retirement')
++            identities.add(identity)
++            if length != 4:
++                raise ValueError('this HartBreaker target emits uncompressed scalar instructions')
++            if raw & 0x7f in (0x2f, 0x07, 0x27, 0x53, 0x57):
++                raise ValueError('native retirement exceeds the scalar outcome profile')
++            counts[hart] += 1
++            count = counts[hart]
++            if count <= 31 and (pc != BOOT + 4*(count-1) or raw != 0x13 | count << 7 or
++                                rd != count or write != 1 or value != 0):
++                raise ValueError('native bootstrap lacks independently specified GPR zero prefix')
++            if write:
++                if rd == 0:
++                    raise ValueError('native writeback illegally writes x0')
++                registers[hart][rd] = value
++            if pc in expected:
++                want_hart, want_rd, want_raw = expected[pc]
++                if (hart, rd, raw) != (want_hart, want_rd, want_raw) or not write or pc in observed:
++                    raise ValueError('MCM load retirement does not match its unique generated instruction')
++                observed[pc] = value
++            terminal[hart] = raw == 0x10500073
++        elif kind == 'CLOSE_HART':
++            if len(fields) != 4:
++                raise ValueError('malformed native hart closure')
++            hart, tick, uid = map(int, fields[1:])
++            if hart not in initialized or hart in closed or not terminal[hart] or counts[hart] < 32:
++                raise ValueError('native closure lacks a unique final WFI for this hart')
++            closed.add(hart)
++        elif kind == 'CLOSE_PREFIX':
++            if len(fields) != 2 or prefix_closed or closed != set(range(4)):
++                raise ValueError('native source prefix closed before every hart')
++            prefix_closed = True
++    if initialized != set(range(4)) or closed != initialized or not prefix_closed:
++        raise ValueError('native trace has no complete four-hart source closure')
++    if set(observed) != set(expected):
++        raise ValueError('native trace omits one or more generated MCM loads')
++    mcmstate.outcome = observed
++    return registers, {hart: [] for hart in corestates}
+diff --git a/hartattack/hartattack/rtlsim/parsesim.py b/hartattack/hartattack/rtlsim/parsesim.py
+index 6533a67b209cb7a27e7b24b02ab6b332303d75a7..61c41f904f6ce24923764f07ff3d01ca8b2eb62e 100644
+--- a/hartattack/hartattack/rtlsim/parsesim.py
++++ b/hartattack/hartattack/rtlsim/parsesim.py
+@@ -98,0 +99,3 @@ def parse_sim_output(
++    if design_name == "blackparrot-fourhart-difftest-s":
++        from .blackparrot import parse_blackparrot_trace
++        return parse_blackparrot_trace(sim_output_l, corestates, mcmstate)
+diff --git a/hartattack/hartattack/states/corestate.py b/hartattack/hartattack/states/corestate.py
+index 13ed079f365d6a747ccfddf5cc51de669455dc84..872a386ff33b5efd4621a692cefe66e744122ee7 100644
+--- a/hartattack/hartattack/states/corestate.py
++++ b/hartattack/hartattack/states/corestate.py
+@@ -41,0 +42 @@ class CoreState:
++        reserved_addr_regs: tuple[IntReg, ...] = (),
+@@ -44 +45,3 @@ class CoreState:
+-        pickable_intregs: list[IntReg] = self.pick_allowed_intregs(test_params.prng)
++        pickable_intregs: list[IntReg] = self.pick_allowed_intregs(
++            test_params.prng, reserved_addr_regs
++        )
+@@ -149,10 +152,11 @@ class CoreState:
+-    def pick_allowed_intregs(self, prng: Random):
+-        """Generates the list of allowed integer register for the current
+-        testcase, the last register is never x0 for convinience
+-        """
+-        intregs = list(IntReg)[:MAX_NUM_PICKABLE_INTREGS]
+-        num_pickable_intregs = prng.randint(
+-            MIN_NUM_PICKABLE_INTREGS, MAX_NUM_PICKABLE_INTREGS
+-        )
+-        allowed_intregs = prng.sample(intregs, num_pickable_intregs)
+-        return allowed_intregs
++    def pick_allowed_intregs(
++        self, prng: Random, reserved_addr_regs: tuple[IntReg, ...] = ()
++    ):
++        """Pick fuzzing registers without reusing this program's address registers."""
++        intregs = [reg for reg in list(IntReg)[:MAX_NUM_PICKABLE_INTREGS]
++                   if reg not in reserved_addr_regs]
++        count = min(prng.randint(MIN_NUM_PICKABLE_INTREGS, MAX_NUM_PICKABLE_INTREGS),
++                    len(intregs))
++        if count < MIN_NUM_PICKABLE_INTREGS:
++            raise ValueError('too few integer registers after address reservation')
++        return prng.sample(intregs, count)
+diff --git a/hartattack/hartattack/states/fuzzerstate.py b/hartattack/hartattack/states/fuzzerstate.py
+index 53935fea5ae15b222ec5291a227f93246639ba72..f1b5c083e51bbbb48392f7bc5a570119b5c64cd7 100644
+--- a/hartattack/hartattack/states/fuzzerstate.py
++++ b/hartattack/hartattack/states/fuzzerstate.py
+@@ -15,0 +16 @@ from ..params import MAX_NUM_STORE_LOCATIONS
++from ..riscv import FenceOrdering
+@@ -39,0 +41,2 @@ class FuzzerState:
++        self.fence_orderings = [ordering for ordering in FenceOrdering
++            if test_params.design_name != "blackparrot-fourhart-difftest-s" or ordering != FenceOrdering.TSO]
+diff --git a/hartattack/hartattack/staticblocks/blackparrot_sync.py b/hartattack/hartattack/staticblocks/blackparrot_sync.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..20e4247f0ab8d3a68e540222d6f462872c089c4c
+--- /dev/null
++++ b/hartattack/hartattack/staticblocks/blackparrot_sync.py
+@@ -0,0 +1,151 @@
++# Copyright 2026 Flavien Solt, Quentin Bordier ETH Zurich.
++# Licensed under the General Public License, Version 3.0, see LICENSE for details.
++# SPDX-License-Identifier: GPL-3.0-only
++"""Scalar four-hart synchronization for the BlackParrot test target.
++
++Only reserved helper registers are changed. The ELF template owns an initialized
++80-byte region immediately after coresync_addrs. Each arrival/done slot has one
++writer. Hart zero resets MCM data before publishing the release epoch. Any hart
++entering the final block ends further resets and releases peers still waiting.
++"""
++from ..params import CORESYNC_ADDR_REG, MCM_RESET_REG, RELOCATOR_REG
++from ..riscv import CSR, FenceOrdering, ILEN, IntReg
++from ..instgen import (BranchInstr, CSRRegInstr, FenceInstr, ImmRdInstr,
++                       IntLoadInstr, IntStoreInstr, JALInstr, JALRInstr,
++                       R12DInstr, RegImmInstr, WfiInstr)
++from ..asm import li_into_reg
++
++SYNC_OFFSET = 0x400
++RELEASE = 0
++STOP = 8
++ARRIVAL = 16
++DONE = 48
++SYNC_BYTES = 80
++_BASE = CORESYNC_ADDR_REG[0]
++_EPOCH = RELOCATOR_REG[0]
++_VALUE = IntReg.t4
++_POINTER = IntReg.t3
++
++
++class _Block:
++    def __init__(self):
++        self.instructions = []
++        self.labels = {}
++        self.branches = []
++
++    def emit(self, instruction):
++        self.instructions.append(instruction)
++
++    def label(self, name):
++        if name in self.labels:
++            raise ValueError(f'duplicate synchronization label {name}')
++        self.labels[name] = len(self.instructions)
++
++    def branch(self, opcode, left, right, target):
++        self.branches.append((len(self.instructions), target))
++        self.emit(BranchInstr(opcode, left, right, 0, True, True, fixed_opcode=True))
++
++    def jump(self, target):
++        self.branches.append((len(self.instructions), target))
++        self.emit(JALInstr('jal', IntReg.zero, 0, True))
++
++    def finish(self):
++        for index, target in self.branches:
++            self.instructions[index].imm = (self.labels[target] - index) * ILEN
++        return self.instructions
++
++
++def _require_four_harts(test_params):
++    if not test_params.is_rv64 or test_params.hartids != [0, 1, 2, 3]:
++        raise ValueError('BlackParrot scalar synchronization requires RV64 harts 0..3')
++
++
++def _load(block, target, base, offset):
++    block.emit(IntLoadInstr('ld', target, base, offset, None, True))
++
++
++def _store(block, base, source, offset):
++    block.emit(IntStoreInstr('sd', base, source, offset, None, True))
++
++
++def _fence(block):
++    block.emit(FenceInstr('fence', FenceOrdering.RW_RW))
++
++
++def _restore_helpers(block):
++    block.label('restore')
++    block.emit(RegImmInstr('addi', _EPOCH, IntReg.zero, 1, True))
++    block.emit(RegImmInstr('slli', _EPOCH, _EPOCH, 31, True))
++    block.emit(ImmRdInstr('lui', _VALUE, 0b110, True))
++    block.emit(RegImmInstr('srli', _POINTER, _VALUE, 2, True))
++    block.emit(RegImmInstr('addi', _BASE, _BASE, -SYNC_OFFSET, True))
++    _fence(block)
++    block.emit(JALRInstr('jalr', IntReg.zero, MCM_RESET_REG, 0, None, True))
++
++
++def gen_blackparrot_reset(fuzzerstate, test_params):
++    _require_four_harts(test_params)
++    block = _Block()
++    _fence(block)
++    block.emit(RegImmInstr('addi', _BASE, _BASE, SYNC_OFFSET, True))
++    _load(block, _VALUE, _BASE, STOP)
++    block.branch('bne', _VALUE, IntReg.zero, 'restore')
++    block.emit(CSRRegInstr('csrrs', _VALUE, IntReg.zero, CSR.MHARTID))
++    block.emit(RegImmInstr('slli', _POINTER, _VALUE, 3, True))
++    block.emit(R12DInstr('add', _POINTER, _BASE, _POINTER))
++    _load(block, _EPOCH, _POINTER, ARRIVAL)
++    block.emit(RegImmInstr('addi', _EPOCH, _EPOCH, 1, True))
++    _store(block, _POINTER, _EPOCH, ARRIVAL)
++    _fence(block)
++    block.branch('bne', _VALUE, IntReg.zero, 'wait_release')
++    for hart in range(4):
++        block.label(f'wait_arrival_{hart}')
++        _load(block, _VALUE, _BASE, STOP)
++        block.branch('bne', _VALUE, IntReg.zero, 'restore')
++        _load(block, _VALUE, _BASE, ARRIVAL + 8 * hart)
++        block.branch('bltu', _VALUE, _EPOCH, f'wait_arrival_{hart}')
++    _fence(block)
++    for address in fuzzerstate.store_locations:
++        upper, lower = li_into_reg(address)
++        block.emit(RegImmInstr('addi', _VALUE, IntReg.zero, 1, True))
++        block.emit(RegImmInstr('slli', _VALUE, _VALUE, 31, True))
++        block.emit(ImmRdInstr('lui', _POINTER, upper, True))
++        block.emit(RegImmInstr('addi', _POINTER, _POINTER, lower, True))
++        block.emit(R12DInstr('add', _POINTER, _POINTER, _VALUE))
++        _store(block, _POINTER, IntReg.zero, 0)
++    _fence(block)
++    _store(block, _BASE, _EPOCH, RELEASE)
++    block.jump('restore')
++    block.label('wait_release')
++    _load(block, _VALUE, _BASE, STOP)
++    block.branch('bne', _VALUE, IntReg.zero, 'restore')
++    _load(block, _VALUE, _BASE, RELEASE)
++    block.branch('bltu', _VALUE, _EPOCH, 'wait_release')
++    _restore_helpers(block)
++    instructions = block.finish()
++    if len(instructions) * ILEN > 0x1000:
++        raise ValueError('BlackParrot MCM handler exceeds its reserved page')
++    fuzzerstate.mcm_state_rst_instrs = instructions
++
++
++def gen_blackparrot_terminal(test_params, is_rtl):
++    _require_four_harts(test_params)
++    block = _Block()
++    _fence(block)
++    block.emit(RegImmInstr('addi', _BASE, _BASE, SYNC_OFFSET, True))
++    block.emit(RegImmInstr('addi', _VALUE, IntReg.zero, 1, True))
++    _store(block, _BASE, _VALUE, STOP)
++    _fence(block)
++    block.emit(CSRRegInstr('csrrs', _POINTER, IntReg.zero, CSR.MHARTID))
++    block.emit(RegImmInstr('slli', _POINTER, _POINTER, 3, True))
++    block.emit(R12DInstr('add', _POINTER, _BASE, _POINTER))
++    _store(block, _POINTER, _VALUE, DONE)
++    _fence(block)
++    for hart in range(4):
++        block.label(f'wait_done_{hart}')
++        _load(block, _VALUE, _BASE, DONE + hart * 8)
++        block.branch('beq', _VALUE, IntReg.zero, f'wait_done_{hart}')
++    _fence(block)
++    if is_rtl:
++        block.emit(WfiInstr())
++    return block.finish()
+diff --git a/hartattack/hartattack/staticblocks/finalblock.py b/hartattack/hartattack/staticblocks/finalblock.py
+index 7996b6d33d6b332be288be2a66cced0d4302506c..4dd1d1117df3fde6a8d16547810df93448c9940e 100644
+--- a/hartattack/hartattack/staticblocks/finalblock.py
++++ b/hartattack/hartattack/staticblocks/finalblock.py
+@@ -97,0 +98,10 @@ def gen_finalblock(
++    if test_params.design_name == "blackparrot-fourhart-difftest-s":
++        from .blackparrot_sync import gen_blackparrot_terminal
++        final_bb_instr = gen_blackparrot_terminal(test_params, is_rtl)
++        if not is_rtl:
++            _gen_termination_sequence("spike", final_bb_instr, int_store, is_rv64)
++        if len(final_bb_instr) * ILEN > MAX_FINAL_BLOCK_SIZE:
++            raise ValueError("BlackParrot terminal block exceeds its allocation")
++        fuzzerstate.final_bb_instrs = final_bb_instr
++        return True
++
+diff --git a/hartattack/hartattack/staticblocks/initialblock.py b/hartattack/hartattack/staticblocks/initialblock.py
+index 1245b31100ced2cae8d808d0f87f20687dddf0ff..84255d379349b0f88047bc9d6a08ee92efdc089a 100644
+--- a/hartattack/hartattack/staticblocks/initialblock.py
++++ b/hartattack/hartattack/staticblocks/initialblock.py
+@@ -191,0 +192,3 @@ def _initialize_csrs(instrs: "list[RVInstr]", is_rv64: bool, test_params: "TestP
++    if test_params.design_name == "blackparrot-fourhart-difftest-s":
++        instrs.append(CSRRegInstr("csrrw", IntReg.zero, IntReg.zero, CSR.MIE))
++
+@@ -193 +196 @@ def _initialize_csrs(instrs: "list[RVInstr]", is_rv64: bool, test_params: "TestP
+-    if test_params.num_harts > 1:
++    if test_params.num_harts > 1 and test_params.design_name != "blackparrot-fourhart-difftest-s":
+@@ -250,0 +254,8 @@ def gen_initial_basic_block(
++    # BlackParrot's unreset GPR SRAM needs an independently checkable start.
++    # All harts execute the same x0-based writes before touching any GPR.
++    if test_params.design_name == "blackparrot-fourhart-difftest-s":
++        instrs.extend(
++            RegImmInstr("addi", reg, IntReg.zero, 0, is_rv64)
++            for reg in list(IntReg)[1:]
++        )
++
+@@ -255 +266,3 @@ def gen_initial_basic_block(
+-    if test_params.num_harts > 1:
++    # The scalar BlackParrot experiment has no checked CLINT/MMIO or trap
++    # lifecycle. Leave interrupts disabled throughout this restricted profile.
++    if test_params.num_harts > 1 and test_params.design_name != "blackparrot-fourhart-difftest-s":
+@@ -308,4 +321,4 @@ def gen_initial_basic_block(
+-    floatregs = list(FloatReg)
+-    for freg in floatregs:
+-        if freg not in all_pickable_floatregs:
+-            instrs.append(FloatIntRs1Instr("fmv.w.x", freg, IntReg.zero, is_rv64))
++    if test_params.design_has_fpu:
++        for freg in FloatReg:
++            if freg not in all_pickable_floatregs:
++                instrs.append(FloatIntRs1Instr("fmv.w.x", freg, IntReg.zero, is_rv64))
+diff --git a/hartattack/hartattack/staticblocks/mcmresethandler.py b/hartattack/hartattack/staticblocks/mcmresethandler.py
+index 6128136af09bd5496651cf69dae6e197d5509b06..8b6c22d36fecf27b4eb6eddc8d41198c3c43f6b0 100644
+--- a/hartattack/hartattack/staticblocks/mcmresethandler.py
++++ b/hartattack/hartattack/staticblocks/mcmresethandler.py
+@@ -69,0 +70,5 @@ def gen_mcm_statereset_handler(fuzzerstate: "FuzzerState", test_params: "TestPar
++    if test_params.design_name == "blackparrot-fourhart-difftest-s":
++        from .blackparrot_sync import gen_blackparrot_reset
++        gen_blackparrot_reset(fuzzerstate, test_params)
++        return
++
