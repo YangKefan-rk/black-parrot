@@ -25,6 +25,11 @@ module bp_me_nonsynth_sfuzz_cce
    , input logic inv_ack_i
    , input logic [paddr_width_p-1:0] ack_address_i
    , input logic [lce_id_width_p-1:0] ack_source_i
+   , input logic owner_cmd_i
+   , input logic [paddr_width_p-1:0] owner_line_i
+   , input logic [lce_id_width_p-1:0] owner_lce_i
+   , input bp_coh_states_e owner_state_i
+   , input bp_coh_states_e proposed_state_i
    );
 
   import "DPI-C" context function void bp_sfuzz_cce_sample
@@ -35,9 +40,20 @@ module bp_me_nonsynth_sfuzz_cce
      , input int unsigned inv_sent
      , input longint unsigned inv_line_addr
      , input int unsigned inv_dst_lce
+     , input int unsigned requestor_lce
      , input int unsigned inv_ack
      , input longint unsigned ack_line_addr
      , input int unsigned ack_src_lce);
+
+  import "DPI-C" context function void bp_sfuzz_owner_cmd
+    (input longint unsigned source_time
+     , input int unsigned cce_id
+     , input longint unsigned epoch
+     , input longint unsigned line_addr
+     , input int unsigned owner_lce
+     , input int unsigned requestor_lce
+     , input int unsigned old_state
+     , input int unsigned proposed_state);
 
   localparam int unsigned line_bytes_lp = bedrock_block_width_p / 8;
   logic [63:0] epoch_r = 0;
@@ -73,8 +89,10 @@ module bp_me_nonsynth_sfuzz_cce
                                     inv_sent_i, inv_ack_i}) || source_time_i[0]
             || (last_source_time_r != 0 && source_time_i != last_source_time_r + 2))
           $fatal(1, "SFUZZ CCE source has a gap, unknown identity or wrong clock phase");
-        if ((inv_sent_i && $isunknown({inv_address_i, inv_destination_i}))
-            || (inv_ack_i && $isunknown({ack_address_i, ack_source_i})))
+        if ((inv_sent_i && $isunknown({inv_address_i, inv_destination_i, requestor_i}))
+            || (inv_ack_i && $isunknown({ack_address_i, ack_source_i}))
+            || (owner_cmd_i && $isunknown({owner_line_i, owner_lce_i,
+                                         requestor_i, owner_state_i, proposed_state_i})))
           $fatal(1, "SFUZZ CCE event address or LCE identity is unknown");
         last_source_time_r = source_time_i;
         // Distinct send/ACK addresses are independent: ACKs may return while
@@ -83,9 +101,15 @@ module bp_me_nonsynth_sfuzz_cce
           32'(pending_i), 32'(inv_sent_i),
           inv_sent_i ? 64'(inv_address_i) & ~(64'(line_bytes_lp) - 1) : 0,
           inv_sent_i ? 32'(inv_destination_i) : 0,
+          inv_sent_i ? 32'(requestor_i) : 0,
           32'(inv_ack_i),
           inv_ack_i ? 64'(ack_address_i) & ~(64'(line_bytes_lp) - 1) : 0,
           inv_ack_i ? 32'(ack_source_i) : 0);
+        if (owner_cmd_i)
+          bp_sfuzz_owner_cmd(source_time_i, 32'(cce_id_i), epoch_r,
+            64'(owner_line_i) & ~(64'(line_bytes_lp) - 1),
+            32'(owner_lce_i), 32'(requestor_i),
+            32'(owner_state_i), 32'(proposed_state_i));
       end
     end
   end
@@ -189,7 +213,12 @@ bind bp_cce_fsm bp_me_nonsynth_sfuzz_cce
    ,.inv_ack_i(fsm_resp_v_li && fsm_resp_yumi_lo && fsm_resp_new_li
      && fsm_resp_header_li.msg_type.resp == e_bedrock_resp_inv_ack)
    ,.ack_address_i(fsm_resp_header_li.addr)
-   ,.ack_source_i(fsm_resp_header_li.payload.src_id));
+   ,.ack_source_i(fsm_resp_header_li.payload.src_id)
+   ,.owner_cmd_i(state_r == e_transfer && fsm_cmd_v_lo && fsm_cmd_new_lo)
+   ,.owner_line_i(fsm_cmd_header_lo.addr)
+   ,.owner_lce_i(mshr_r.owner_lce_id)
+   ,.owner_state_i(mshr_r.owner_coh_state)
+   ,.proposed_state_i(fsm_cmd_header_lo.payload.state));
 
 bind bp_lce_req bp_me_nonsynth_sfuzz_dcache_lce
   #(.bp_params_p(bp_params_p), .capacity_p(credits_p)) sfuzz_lce_probe
