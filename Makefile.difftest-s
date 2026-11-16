@@ -133,6 +133,10 @@ BP_DIFFTEST_CPP_SOURCES += $(BP_ADAPTER_DIR)/session_adapter.cpp $(BP_ADAPTER_DI
 	$(BP_RVWMO_DIR)/spike_reference_stepper.cpp \
 	$(BP_RVWMO_DIR)/spike_reference_pool.cpp $(BP_DIFFTEST_DIR)/globalmem_storage.cpp \
 	$(abspath $(DIFFTEST_S_BOOTSTRAP_SOURCE))
+# The additive ordered observer has no counterpart in older Difftest-S builds.
+ifneq ($(wildcard $(BP_RVWMO_DIR)/feedback_observer.cpp),)
+BP_DIFFTEST_CPP_SOURCES += $(BP_RVWMO_DIR)/feedback_observer.cpp
+endif
 VV_BUILD_OPTS += -CFLAGS "-I$(DIFFTEST_S_SPIKE_HOME)"
 VV_BUILD_OPTS += -LDFLAGS "$(abspath $(DIFFTEST_S_SPIKE_LIBRARY)) -Wl,-rpath,$(dir $(abspath $(DIFFTEST_S_SPIKE_LIBRARY)))"
 VV_RUN_OPTS += +bp_difftest_s_elf=$(abspath $(SIM_PROG))
