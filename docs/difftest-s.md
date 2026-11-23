@@ -15,6 +15,14 @@ this profile.
 
 ## Dependencies
 
+For the November 2026 integration, use
+[Difftest-S](https://github.com/YangKefan-rk/difftest-s) at
+`002135c4121b5d063c797bcf9522a0c24f1fdc01` and
+[Spike](https://github.com/YangKefan-rk/Spike) at
+`fce03d82f076f7e6eb1384ebbd27cd112357088f`. The Makefile includes the
+ordered feedback collector when the selected checker supplies it. This is a
+build option, not a change to the checked memory or completion contract.
+
 Provide these dependencies before building:
 
 - GNU Make, Bash, Git, Verilator with `--binary` and timing support, and a C++20

@@ -46,6 +46,8 @@ We first announced BlackParrot at FOSDEM 2020! [slides](https://fosdem.org/2020/
 
 ## Environments
 
+This fork also provides a [four-hart Verilator and Difftest-S build](docs/difftest-s.md) for the synchronous scalar profile.
+
 This RTL repo is intended to be used with a specific [SDK](https://github.com/black-parrot-sdk/) and [HDK](https://github.com/black-parrot-hdk/) depending on the simulation / FPGA / ASIC environment desired.
 For first-time users of BlackParrot, we recommend starting from the [BlackParrot Simulation Environment](https://github.com/black-parrot/black-parrot-sim), which packages the BlackParrot RTL and SDK in a compatible manner.
 We intend to release several examples of BlackParrot environments which package the RTL, SDK and HDK together for evaluation.
